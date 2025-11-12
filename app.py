@@ -128,7 +128,7 @@ def create_template():
 
         elements.extend([title, Spacer(1, 12), info, Spacer(1, 24)])
 
-        # Build table
+        # Build table test
         data = [headings]
         for _ in range(row_number):
             data.append(["" for _ in headings])
