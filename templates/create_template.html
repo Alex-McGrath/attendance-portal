@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Create Custom Attendance Sheet</title>
+</head>
+<body>
+  <h1>Create Your Own Attendance Sheet</h1>
+  
+  <form action="/create-template" method="POST">
+    <label>Class Name:</label><br>
+    <input type="text" name="class_name" placeholder="e.g. CS264" required><br><br>
+
+    <label>Date (leave blank for today):</label><br>
+    <input type="date" name="date"><br><br>
+
+    <label>Column Headings (comma separated):</label><br>
+    <input type="text" name="headings" placeholder="Student Number, Student Name, Signature" ><br><br>
+
+    <label>Number of Rows:</label><br>
+    <input type="text" name="row_number" placeholder="eg: 20" required><br><br>
+
+    <button type="submit">Generate PDF</button>
+  </form>
+</body>
+</html>
