@@ -8,6 +8,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from datetime import datetime
 import os
 import csv
+import pdfplumber
 from io import TextIOWrapper
 
 # --- Flask Setup ---
@@ -81,15 +82,39 @@ def download_template():
     return send_file(file_path, as_attachment=True)
 
 
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    file = request.files.get('file')
-    if file:
-        filename = file.filename
-        upload_path = os.path.join("uploads", filename)
-        file.save(upload_path)
-        return f"File '{filename}' uploaded successfully!"
-    return "No file uploaded.", 400
+@app.route('/upload', methods=['GET', 'POST'])
+def upload_sheet():
+    if request.method == 'POST':
+        file = request.files.get('file')
+
+        if not file or file.filename == "":
+            return "No file selected", 400
+        
+        # Save uploaded file
+        save_path = os.path.join("uploads", file.filename)
+        file.save(save_path)
+
+        # --- Extract table using pdfplumber ---
+        extracted_rows = []
+
+        with pdfplumber.open(save_path) as pdf:
+            page = pdf.pages[0]  # first page only for now
+            table = page.extract_table()
+
+            if table:
+                # Remove header row from PDF if needed
+                # or keep it if you'd like
+                extracted_rows = table
+            else:
+                return "No table detected in PDF", 400
+
+        # Pass the extracted rows to a results page
+        return render_template("upload_results.html", rows=extracted_rows, filename=file.filename)
+
+    # GET request → show upload page
+    return render_template('upload.html')
+
+
 
 @app.route('/create-template', methods=['GET', 'POST'])
 def create_template():
