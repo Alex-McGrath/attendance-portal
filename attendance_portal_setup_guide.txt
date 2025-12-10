@@ -1,0 +1,75 @@
+ATTENDANCE PORTAL - QUICK SETUP GUIDE
+-------------------------------------
+Author: Alex McGrath
+Institution: Maynooth University
+Module: Final Year Project
+
+=====================================
+1. CLONE THE PROJECT (IF USING GITHUB)
+=====================================
+git clone https://github.com/<your-username>/attendance_portal.git
+cd attendance_portal
+
+=====================================
+2. CREATE & ACTIVATE VIRTUAL ENVIRONMENT
+=====================================
+# On Windows (PowerShell)
+python -m venv venv
+.
+env\Scripts\Activate.ps1
+
+# On Command Prompt
+py -m venv venv
+venv\Scripts\activate
+
+# On macOS/Linux
+python3 -m venv venv
+source venv/bin/activate
+
+=====================================
+3. INSTALL REQUIRED PACKAGES
+=====================================
+pip install flask reportlab
+
+# If pip is outdated:
+python -m pip install --upgrade pip
+
+# OR install all dependencies from file
+pip install -r requirements.txt
+
+=====================================
+4. RUN THE FLASK APP
+=====================================
+python app.py
+
+# Open browser and visit:
+http://127.0.0.1:5000/
+
+=====================================
+5. GIT COMMANDS
+=====================================
+# Initialize and connect to GitHub
+git init
+git add .
+git commit -m "Initial commit"
+git branch -M main
+git remote add origin https://github.com/<your-username>/attendance_portal.git
+git push -u origin main
+
+# Update project changes
+git add .
+git commit -m "Updated project"
+git push
+
+# Sync updates on another device
+git pull
+
+=====================================
+6. VENV NOTES
+=====================================
+# Exit venv
+deactivate
+
+# If encountering 'usedforsecurity' error:
+Use Python 3.9+ (ideally 3.12 64-bit).
+

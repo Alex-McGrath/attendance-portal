@@ -3,24 +3,76 @@
 <head>
   <meta charset="UTF-8">
   <title>Create Custom Attendance Sheet</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
-<body>
-  <h1>Create Your Own Attendance Sheet</h1>
-  
-  <form action="/create-template" method="POST">
-    <label>Class Name:</label><br>
-    <input type="text" name="class_name" placeholder="e.g. CS264" required><br><br>
 
-    <label>Date (leave blank for today):</label><br>
-    <input type="date" name="date"><br><br>
+<body class="bg-light">
+  <nav class="navbar bg-white shadow-sm px-4 mb-4">
+    <div class="container-fluid">
+      <a class="navbar-brand fw-bold text-primary" href="/">Attendance Portal</a>
 
-    <label>Column Headings (comma separated):</label><br>
-    <input type="text" name="headings" placeholder="Student Number, Student Name, Signature" ><br><br>
+      <div>
+        <a href="/login" class="text-decoration-none text-dark">
+          <i class="fa-solid fa-user fa-lg"></i>
+        </a>
+      </div>
+    </div>
+  </nav>
 
-    <label>Number of Rows:</label><br>
-    <input type="text" name="row_number" placeholder="eg: 20" required><br><br>
+  <div class="container py-5">
+    <div class="text-center mb-5">
+      <h1 class="fw-bold text-primary">Create Custom Attendance Sheet</h1>
+      <p class="text-muted">Customize your attendance template with specific columns and details.</p>
+    </div>
 
-    <button type="submit">Generate PDF</button>
-  </form>
+    <div class="card shadow-sm border-0 mx-auto" style="max-width: 600px;">
+      <div class="card-body p-4">
+
+        <!-- IMPORTANT: added enctype for file upload -->
+        <form action="/create-template" method="POST" enctype="multipart/form-data">
+
+          <div class="mb-3">
+            <label for="class_name" class="form-label fw-semibold">Class Name</label>
+            <input type="text" id="class_name" name="class_name" class="form-control" placeholder="e.g. CS264" required>
+          </div>
+
+          <div class="mb-3">
+            <label for="date" class="form-label fw-semibold">Date</label>
+            <input type="date" id="date" name="date" class="form-control">
+            <small class="text-muted">Leave blank to use today's date.</small>
+          </div>
+
+          <div class="mb-3">
+            <label for="headings" class="form-label fw-semibold">Column Headings</label>
+            <input type="text" id="headings" name="headings" class="form-control"
+                   placeholder="Student Number, Student Name, Signature">
+            <small class="text-muted">Separate headings with commas. Leave blank for default columns.</small>
+          </div>
+
+          <!-- ⭐ NEW FEATURE: CSV Upload -->
+          <div class="mb-3">
+            <label for="csv_file" class="form-label fw-semibold">Import Student List (CSV)</label>
+            <input type="file" id="csv_file" name="csv_file" class="form-control" accept=".csv">
+            <small class="text-muted">Optional — CSV must contain Student Number and Student Name per row.</small>
+          </div>
+
+          <div class="mb-4">
+            <label for="row_number" class="form-label fw-semibold">Number of Rows</label>
+            <input type="number" id="row_number" name="row_number" class="form-control" placeholder="e.g. 20" min="1">
+          </div>
+
+          <div class="d-flex justify-content-between">
+            <a href="/" class="btn btn-outline-secondary">Back</a>
+            <button type="submit" class="btn btn-success">Generate PDF</button>
+          </div>
+
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

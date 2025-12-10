@@ -3,11 +3,12 @@ from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from datetime import datetime
 import os
+import csv
+from io import TextIOWrapper
 
 # --- Flask Setup ---
 app = Flask(__name__)
@@ -54,7 +55,7 @@ def download_template():
     headers = ["Student Number", "Student Name (Block Caps)", "Signature"]
     data = [headers]
 
-    # Add 20 empty rows
+    # Add 30empty rows
     for _ in range(30):
         data.append(["", "", ""])
 
@@ -95,24 +96,64 @@ def create_template():
     if request.method == 'POST':
         class_name = request.form.get('class_name')
         date = request.form.get('date') or datetime.now().strftime('%d/%m/%Y')
-        headings = request.form.get('headings').split(',')
+
+        # Headings logic
         headings_input = request.form.get('headings', '').strip()
         if headings_input:
             headings = [h.strip() for h in headings_input.split(',') if h.strip()]
         else:
             headings = ["Student Number", "Student Name (Block Caps)", "Signature"]
-        row_number = request.form.get('row_number')
 
+        # Row number logic
+        row_number = request.form.get('row_number')
         try:
             row_number = int(row_number)
         except (TypeError, ValueError):
-            row_number = 30 #default amount if left blank
+            row_number = 30  # Default
 
+        # --- NEW: CSV Upload Handling ---
+        csv_file = request.files.get('csv_file')
+        csv_rows = []
 
-        # Clean up headings (remove spaces)
-        headings = [h.strip() for h in headings]
+        if csv_file and csv_file.filename.endswith('.csv'):
+            csv_stream = TextIOWrapper(csv_file, encoding='utf-8')
+            reader = csv.reader(csv_stream)
 
-        # Create file path
+            for row in reader:
+                # Skip empty rows
+                if not row or len(row) < 2:
+                    continue
+
+                # Skip header row automatically
+                if "student" in row[0].lower():
+                    continue
+
+                student_id = row[0].strip()
+                student_name = row[1].strip()
+                csv_rows.append([student_id, student_name])
+
+        # --- Build Table Data ---
+        data = [headings]
+
+        # Insert CSV rows first
+        for student_id, student_name in csv_rows:
+            row_data = []
+            for h in headings:
+                h_lower = h.lower()
+                if "student" in h_lower and "number" in h_lower:
+                    row_data.append(student_id)
+                elif "name" in h_lower:
+                    row_data.append(student_name)
+                else:
+                    row_data.append("")  # e.g., Signature column
+            data.append(row_data)
+
+        # Fill remaining rows after CSV rows
+        remaining = row_number - len(csv_rows)
+        for _ in range(max(0, remaining)):
+            data.append(["" for _ in headings])
+
+        # PDF Output Path
         file_path = f"generated_templates/{class_name}_attendance_custom.pdf"
 
         # Create PDF
@@ -128,11 +169,7 @@ def create_template():
 
         elements.extend([title, Spacer(1, 12), info, Spacer(1, 24)])
 
-        # Build table test
-        data = [headings]
-        for _ in range(row_number):
-            data.append(["" for _ in headings])
-
+        # Table creation
         table = Table(data, colWidths=[A4[0] / len(headings) - 10] * len(headings))
 
         style = TableStyle([
@@ -148,8 +185,8 @@ def create_template():
 
         return send_file(file_path, as_attachment=True)
 
-    # If GET request — show form
     return render_template('create_template.html')
+
 
 # --- Run the Flask App ---
 if __name__ == '__main__':

@@ -2,53 +2,70 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Lecturer Attendance Portal</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f4f4f9;
-      text-align: center;
-      margin: 0;
-      padding: 0;
-    }
+  <title>Attendance Portal</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
-    h1 {
-      background-color: #3c6e71;
-      color: white;
-      padding: 20px 0;
-      margin-bottom: 40px;
-    }
-
-    a {
-      display: inline-block;
-      text-decoration: none;
-      background-color: #284b63;
-      color: white;
-      padding: 15px 25px;
-      border-radius: 10px;
-      font-size: 18px;
-      margin: 15px;
-      transition: 0.3s ease;
-    }
-
-    a:hover {
-      background-color: #3c6e71;
-    }
-
-    p {
-      color: #333;
-      margin-top: 30px;
-      font-size: 16px;
-    }
-  </style>
 </head>
-<body>
-  <h1>Lecturer Attendance Portal</h1>
 
-  <a href="/download-template">Download Standard Template</a>
-  <a href="/create-template">Create Custom Template</a>
-  <a href="/upload">Upload Completed Sheet</a>
+<body class="bg-light">
+  <nav class="navbar bg-white shadow-sm px-4 mb-4">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold text-primary" href="/">Attendance Portal</a>
 
-  <p>Welcome to your attendance management hub! Choose an option above to get started.</p>
+    <div>
+      <a href="/login" class="text-decoration-none text-dark">
+        <i class="fa-solid fa-user fa-lg"></i>
+      </a>
+    </div>
+  </div>
+</nav>
+
+  <div class="container text-center py-5">
+    <h1 class="fw-bold">Lecturer Attendance Portal</h1>
+    <p class="text-muted mb-5">Choose a tool to manage attendance</p>
+
+    <div class="row g-4 justify-content-center">
+      <div class="col-md-4 col-sm-6">
+        <div class="card shadow-sm border-0 hover-card h-100">
+          <div class="card-body">
+            <h5 class="card-title text-primary">Download Template</h5>
+            <p class="card-text">Get a pre-made attendance sheet ready for printing.</p>
+            <a href="/download-template" class="stretched-link"></a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4 col-sm-6">
+        <div class="card shadow-sm border-0 hover-card h-100">
+          <div class="card-body">
+            <h5 class="card-title text-success">Create Custom Template</h5>
+            <p class="card-text">Make your own template with custom headings.</p>
+            <a href="/create-template" class="stretched-link"></a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4 col-sm-6">
+        <div class="card shadow-sm border-0 hover-card h-100">
+          <div class="card-body">
+            <h5 class="card-title text-warning">Upload Sheet</h5>
+            <p class="card-text">Upload a scanned PDF to record attendance.</p>
+            <a href="/upload" class="stretched-link"></a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4 col-sm-6">
+        <div class="card shadow-sm border-0 hover-card h-100">
+          <div class="card-body">
+            <h5 class="card-title text-secondary">Analytics (Coming Soon)</h5>
+            <p class="card-text">View attendance summaries and statistics.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
