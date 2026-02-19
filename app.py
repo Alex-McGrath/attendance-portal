@@ -1,25 +1,150 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
-from datetime import datetime
 import os
 import csv
 import pdfplumber
 from io import TextIOWrapper
 
+# Database imports
+import sqlite3
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
+
+
 # --- Flask Setup ---
 app = Flask(__name__)
+
+#more database preconditions
+app.secret_key = "dev-secret-change-this-later"
+DB_PATH = "app.db"
+
 
 # Ensure folders exist
 os.makedirs("generated_templates", exist_ok=True)
 os.makedirs("uploads", exist_ok=True)
 
 
+# database helper functions - AI Assisted -
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db_connection()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS user_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        type TEXT NOT NULL,            -- 'upload' or 'template'
+        label TEXT NOT NULL,           -- e.g. CS262
+        filename TEXT NOT NULL,        -- saved file name
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+""")
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
 # --- ROUTES ---
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        confirm = request.form.get("confirm") or ""
+
+        if not username or not password:
+            flash("Username and password are required.")
+            return render_template("register.html")
+
+        if len(username) < 3:
+            flash("Username must be at least 3 characters.")
+            return render_template("register.html")
+
+        if len(password) < 6:
+            flash("Password must be at least 6 characters.")
+            return render_template("register.html")
+
+        if password != confirm:
+            flash("Passwords do not match.")
+            return render_template("register.html")
+
+        password_hash = generate_password_hash(password)
+
+        try:
+            conn = get_db_connection()
+            cur = conn.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)",
+                (username, password_hash, datetime.now().isoformat())
+            )
+            conn.commit()
+
+            user_id = cur.lastrowid
+            conn.close()
+
+            # Auto log-in after register
+            session["user_id"] = user_id
+            session["username"] = username
+
+            return redirect(url_for("home"))
+
+        except sqlite3.IntegrityError:
+            flash("That username is already taken.")
+            return render_template("register.html")
+
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+
+        conn = get_db_connection()
+        user = conn.execute(
+            "SELECT * FROM users WHERE username = ?",
+            (username,)
+        ).fetchone()
+        conn.close()
+
+        if user is None or not check_password_hash(user["password_hash"], password):
+            flash("Invalid username or password.")
+            return render_template("login.html")
+
+        session["user_id"] = user["id"]
+        session["username"] = user["username"]
+
+        return redirect(url_for("home"))
+
+    return render_template("login.html")
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("home"))
+
+
+
 
 @app.route('/')
 def home():
@@ -85,14 +210,38 @@ def download_template():
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_sheet():
     if request.method == 'POST':
+        session_name = (request.form.get("session_name") or "").strip()
+
+        if not session_name:
+            return "Session name is required", 400
+
         file = request.files.get('file')
 
         if not file or file.filename == "":
             return "No file selected", 400
         
         # Save uploaded file
-        save_path = os.path.join("uploads", file.filename)
+        # Clean session name for filename use
+        safe_name = session_name.replace(" ", "_")
+
+        # Keep original file extension
+        _, ext = os.path.splitext(file.filename)
+
+        timestamp = datetime.now().strftime('%Y-%m-%d')
+
+        new_filename = f"{timestamp}_{safe_name}{ext}"
+        save_path = os.path.join("uploads", new_filename)
+
         file.save(save_path)
+        if session.get("user_id"):
+            conn = get_db_connection()
+            conn.execute(
+                "INSERT INTO user_files (user_id, type, label, filename, created_at) VALUES (?, ?, ?, ?, ?)",
+                (session["user_id"], "upload", session_name, new_filename, datetime.now().isoformat())
+            )
+            conn.commit()
+            conn.close()
+
 
         # --- Extract table using pdfplumber ---
         extracted_rows = []
@@ -109,9 +258,15 @@ def upload_sheet():
                 return "No table detected in PDF", 400
 
         # Pass the extracted rows to a results page
-        return render_template("upload_results.html", rows=extracted_rows, filename=file.filename)
+        return render_template(
+            "upload_results.html",
+            rows=extracted_rows,
+            filename=new_filename,  
+            session_name=session_name
+        )
 
-    # GET request → show upload page
+
+    # GET request -> show upload page
     return render_template('upload.html')
 
 
@@ -211,6 +366,83 @@ def create_template():
         return send_file(file_path, as_attachment=True)
 
     return render_template('create_template.html')
+
+@app.route("/profile")
+def profile():
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+    uploads = conn.execute(
+        """
+        SELECT id, label, filename, created_at
+        FROM user_files
+        WHERE user_id = ? AND type = 'upload'
+        ORDER BY created_at DESC
+        """,
+        (session["user_id"],)
+    ).fetchall()
+
+    templates = conn.execute(
+        """
+        SELECT id, label, filename, created_at
+        FROM user_files
+        WHERE user_id = ? AND type = 'template'
+        ORDER BY created_at DESC
+        """,
+        (session["user_id"],)
+    ).fetchall()
+
+    conn.close()
+
+    return render_template("profile.html", uploads=uploads, templates=templates)
+
+@app.route("/files/<file_type>/<path:filename>")
+def download_saved_file(file_type, filename):
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    if file_type == "upload":
+        folder = "uploads"
+    elif file_type == "template":
+        folder = "generated_templates"
+    else:
+        return "Invalid file type", 400
+
+    file_path = os.path.join(folder, filename)
+
+    if not os.path.exists(file_path):
+        return "File not found", 404
+
+    return send_file(file_path, as_attachment=True)
+
+@app.route("/view/upload/<path:filename>")
+def view_uploaded_file(filename):
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    file_path = os.path.join("uploads", filename)
+
+    if not os.path.exists(file_path):
+        return "File not found", 404
+
+    extracted_rows = []
+
+    with pdfplumber.open(file_path) as pdf:
+        page = pdf.pages[0]
+        table = page.extract_table()
+
+        if table:
+            extracted_rows = table
+        else:
+            return "No table detected in PDF", 400
+
+    return render_template(
+        "upload_results.html",
+        rows=extracted_rows,
+        filename=filename,
+        session_name="Saved Session"
+    )
 
 
 # --- Run the Flask App ---
