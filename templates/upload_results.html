@@ -11,27 +11,42 @@
     File: <b>{{ filename }}</b>
   </p>
 
-
   <div class="table-responsive">
-    <table class="table table-bordered table-striped">
-      <thead class="table-dark">
+  <table class="table table-bordered table-striped align-middle">
+    <thead class="table-dark">
+      <tr>
+        <th>Student Number</th>
+        <th>Student Name (Block Caps)</th>
+        <th>Signature</th>
+        <th>In attendance?</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
         <tr>
-          {% for col in rows[0] %}
-            <th>{{ col }}</th>
-          {% endfor %}
+          <td>{{ row.student_no }}</td>
+          <td>{{ row.student_name }}</td>
+          <td>
+            {% if row.sig_img %}
+              <img src="{{ row.sig_img }}" alt="Signature" style="max-height:40px;">
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td class="fw-semibold">
+            {% if row.present is none %}
+              -
+            {% elif row.present %}
+              Yes
+            {% else %}
+              No
+            {% endif %}
+          </td>
         </tr>
-      </thead>
-      <tbody>
-        {% for row in rows[1:] %}
-          <tr>
-            {% for cell in row %}
-              <td>{{ cell }}</td>
-            {% endfor %}
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 
   <a href="/" class="btn btn-secondary mt-3">Back to Portal</a>
 

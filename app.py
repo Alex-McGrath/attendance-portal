@@ -8,12 +8,15 @@ from reportlab.lib.styles import getSampleStyleSheet
 import os
 import csv
 import pdfplumber
+import io
+import base64
 from io import TextIOWrapper
 
 # Database imports
 import sqlite3
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 
 
 # --- Flask Setup ---
@@ -61,6 +64,109 @@ def init_db():
     conn.close()
 
 init_db()
+
+def crop_cell_to_data_uri(page, bbox, resolution=150, inset=2):
+    x0, top, x1, bottom = bbox
+
+    # Inset slightly to avoid grid lines
+    x0 += inset; top += inset; x1 -= inset; bottom -= inset
+
+    cropped = page.crop((x0, top, x1, bottom))
+    img = cropped.to_image(resolution=resolution).original  # PIL Image
+
+    present = signature_present_from_pil(img)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    return f"data:image/png;base64,{b64}", present
+
+def extract_rows_with_signature_images(pdf_path):
+    def get_bbox(cell):
+        # Case 1: object with .bbox
+        if hasattr(cell, "bbox"):
+            return cell.bbox
+
+        # Case 2: tuple/list already (x0, top, x1, bottom)
+        if isinstance(cell, (tuple, list)) and len(cell) == 4:
+            return tuple(cell)
+
+        # Case 3: dict-like cell
+        if isinstance(cell, dict):
+            # common keys in pdfplumber outputs
+            if all(k in cell for k in ("x0", "top", "x1", "bottom")):
+                return (cell["x0"], cell["top"], cell["x1"], cell["bottom"])
+            # sometimes y0/y1 instead of top/bottom
+            if all(k in cell for k in ("x0", "y0", "x1", "y1")):
+                return (cell["x0"], cell["y0"], cell["x1"], cell["y1"])
+
+        return None
+
+    with pdfplumber.open(pdf_path) as pdf:
+        page = pdf.pages[0]
+
+        tables = page.find_tables()
+        if not tables:
+            return None
+
+        t = tables[0]
+        text_rows = t.extract()   # list of text rows
+        row_objs = t.rows         # geometry rows
+
+        out_rows = []
+
+        for r in range(1, len(text_rows)):  # skip header
+            row_text = text_rows[r]
+            if not row_text or len(row_text) < 2:
+                continue
+
+            row_obj = row_objs[r]
+            cells = row_obj.cells if hasattr(row_obj, "cells") else row_obj
+
+            sig_cell = cells[-1]
+            bbox = get_bbox(sig_cell)
+
+            if bbox is None:
+                # If this happens, we can print/debug what type it is
+                return "Could not read signature cell bbox", 500
+
+            # Some PDFs may return None for empty cells, so guard with "or ''"
+            student_no = (row_text[0] or "").strip()
+            student_name = (row_text[1] or "").strip()
+
+            has_student_data = bool(student_no or student_name)
+
+            sig_img, present_raw = crop_cell_to_data_uri(page, bbox)
+
+            out_rows.append({
+                "student_no": student_no,
+                "student_name": student_name,
+                "sig_img": sig_img,
+                # Only show Yes/No if there is a student on that row
+                "present": present_raw if has_student_data else None
+            })
+            
+
+        return out_rows
+
+def signature_present_from_pil(img, dark_threshold=200, min_dark_ratio=0.01):
+    """
+    Returns True if the image likely contains ink (signature), else False.
+    dark_threshold: pixel values below this are considered 'ink' (0=black, 255=white)
+    min_dark_ratio: fraction of dark pixels needed to count as present
+    """
+    # Convert to grayscale for a stable threshold test
+    g = img.convert("L")
+
+    # Optional: speed + smoothing (helps with noise)
+    g = g.resize((max(1, g.width // 2), max(1, g.height // 2)))
+
+    pixels = list(g.getdata())
+    dark = sum(1 for p in pixels if p < dark_threshold)
+    ratio = dark / max(1, len(pixels))
+
+    return ratio >= min_dark_ratio
 
 # --- ROUTES ---
 
@@ -211,28 +317,23 @@ def download_template():
 def upload_sheet():
     if request.method == 'POST':
         session_name = (request.form.get("session_name") or "").strip()
-
         if not session_name:
             return "Session name is required", 400
 
         file = request.files.get('file')
-
         if not file or file.filename == "":
             return "No file selected", 400
-        
-        # Save uploaded file
-        # Clean session name for filename use
-        safe_name = session_name.replace(" ", "_")
 
-        # Keep original file extension
+        safe_name = session_name.replace(" ", "_")
         _, ext = os.path.splitext(file.filename)
 
         timestamp = datetime.now().strftime('%Y-%m-%d')
-
         new_filename = f"{timestamp}_{safe_name}{ext}"
         save_path = os.path.join("uploads", new_filename)
 
         file.save(save_path)
+
+        # Save metadata if logged in
         if session.get("user_id"):
             conn = get_db_connection()
             conn.execute(
@@ -242,31 +343,18 @@ def upload_sheet():
             conn.commit()
             conn.close()
 
+        # Extract table + signature images
+        rows = extract_rows_with_signature_images(save_path)
+        if rows is None:
+            return "No table detected in PDF", 400
 
-        # --- Extract table using pdfplumber ---
-        extracted_rows = []
-
-        with pdfplumber.open(save_path) as pdf:
-            page = pdf.pages[0]  # first page only for now
-            table = page.extract_table()
-
-            if table:
-                # Remove header row from PDF if needed
-                # or keep it if you'd like
-                extracted_rows = table
-            else:
-                return "No table detected in PDF", 400
-
-        # Pass the extracted rows to a results page
         return render_template(
             "upload_results.html",
-            rows=extracted_rows,
-            filename=new_filename,  
+            rows=rows,
+            filename=new_filename,
             session_name=session_name
         )
 
-
-    # GET request -> show upload page
     return render_template('upload.html')
 
 
@@ -422,28 +510,67 @@ def view_uploaded_file(filename):
         return redirect(url_for("login"))
 
     file_path = os.path.join("uploads", filename)
-
     if not os.path.exists(file_path):
         return "File not found", 404
 
-    extracted_rows = []
-
-    with pdfplumber.open(file_path) as pdf:
-        page = pdf.pages[0]
-        table = page.extract_table()
-
-        if table:
-            extracted_rows = table
-        else:
-            return "No table detected in PDF", 400
+    rows = extract_rows_with_signature_images(file_path)
+    if rows is None:
+        return "No table detected in PDF", 400
 
     return render_template(
         "upload_results.html",
-        rows=extracted_rows,
+        rows=rows,
         filename=filename,
         session_name="Saved Session"
     )
 
+@app.route("/delete/<int:file_id>", methods=["POST"])
+def delete_file(file_id):
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+
+    conn = get_db_connection()
+
+    # Only allow deleting files that belong to the logged-in user
+    file_row = conn.execute(
+        "SELECT id, user_id, type, filename FROM user_files WHERE id = ?",
+        (file_id,)
+    ).fetchone()
+
+    if file_row is None:
+        conn.close()
+        return "File not found", 404
+
+    if file_row["user_id"] != session["user_id"]:
+        conn.close()
+        return "Unauthorized", 403
+
+    # Work out folder based on type
+    if file_row["type"] == "upload":
+        folder = "uploads"
+    elif file_row["type"] == "template":
+        folder = "generated_templates"
+    else:
+        conn.close()
+        return "Invalid file type", 400
+
+    file_path = os.path.join(folder, file_row["filename"])
+
+    # Delete DB row first (so UI updates even if file already missing)
+    conn.execute("DELETE FROM user_files WHERE id = ?", (file_id,))
+    conn.commit()
+    conn.close()
+
+    # Then try delete the file from disk (ignore if already gone)
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        # Optional: log it
+        print("Error deleting file:", e)
+
+    flash("File deleted.")
+    return redirect(url_for("profile"))
 
 # --- Run the Flask App ---
 if __name__ == '__main__':

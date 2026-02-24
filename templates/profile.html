@@ -29,17 +29,27 @@
                     <tr>
                       <td class="fw-semibold">{{ u["label"] }}</td>
                       <td class="text-muted">{{ u["created_at"] }}</td>
-                    <td class="text-end">
-                        <a class="btn btn-sm btn-outline-secondary me-2"
-                            href="/view/upload/{{ u['filename'] }}">
-                            View
-                        </a>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-secondary me-2"
+                                href="/view/upload/{{ u['filename'] }}">
+                                View
+                            </a>
 
-                        <a class="btn btn-sm btn-outline-primary"
-                            href="/files/upload/{{ u['filename'] }}">
-                            Download
-                        </a>
-                    </td>
+                            <a class="btn btn-sm btn-outline-primary me-2"
+                                href="/files/upload/{{ u['filename'] }}">
+                                Download
+                            </a>
+
+                            <form action="{{ url_for('delete_file', file_id=u['id']) }}"
+                                method="POST"
+                                style="display:inline;">
+                                <button type="submit"
+                                        class="btn btn-sm btn-outline-danger"
+                                        onclick="return confirm('Delete this upload?');">
+                                    🗑
+                                </button>
+                            </form>
+                        </td>
 
                     </tr>
                   {% endfor %}
