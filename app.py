@@ -59,6 +59,17 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id)
     )
 """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS attendance_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        upload_file_id INTEGER NOT NULL,   -- references user_files.id
+        student_no TEXT,
+        student_name TEXT,
+        present INTEGER NOT NULL,          -- 1 = present, 0 = absent
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (upload_file_id) REFERENCES user_files(id)
+    )
+""")
 
     conn.commit()
     conn.close()
@@ -81,6 +92,15 @@ def crop_cell_to_data_uri(page, bbox, resolution=150, inset=2):
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
     return f"data:image/png;base64,{b64}", present
+
+def login_required(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        if not session.get("user_id"):
+            flash("Please log in to access Attendance History.")
+            return redirect(url_for("login"))
+        return view_func(*args, **kwargs)
+    return wrapped
 
 def extract_rows_with_signature_images(pdf_path):
     def get_bbox(cell):
@@ -345,6 +365,42 @@ def upload_sheet():
 
         # Extract table + signature images
         rows = extract_rows_with_signature_images(save_path)
+        # Save attendance records if logged in
+        if session.get("user_id") and rows:
+            conn = get_db_connection()
+
+            # Find the upload id you just inserted (better: keep lastrowid when inserting user_files)
+            upload_row = conn.execute(
+                "SELECT id FROM user_files WHERE user_id = ? AND type = 'upload' AND filename = ?",
+                (session["user_id"], new_filename)
+            ).fetchone()
+
+            if upload_row:
+                upload_id = upload_row["id"]
+
+                for r in rows:
+                    # skip blank rows
+                    if not r["student_no"] and not r["student_name"]:
+                        continue
+
+                    # present might be None for blank rows, so force 0/1 for real students
+                    present_val = 1 if r["present"] else 0
+
+                    conn.execute("""
+                        INSERT INTO attendance_records
+                        (upload_file_id, student_no, student_name, present, created_at)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (
+                        upload_id,
+                        r["student_no"],
+                        r["student_name"],
+                        present_val,
+                        datetime.now().isoformat()
+                    ))
+
+                conn.commit()
+
+            conn.close()
         if rows is None:
             return "No table detected in PDF", 400
 
@@ -484,6 +540,55 @@ def profile():
     conn.close()
 
     return render_template("profile.html", uploads=uploads, templates=templates)
+
+@app.route("/history")
+@login_required
+def history():
+    conn = get_db_connection()
+
+    sessions = conn.execute(
+        """
+        SELECT id, label, created_at
+        FROM user_files
+        WHERE user_id = ? AND type = 'upload'
+        ORDER BY created_at DESC
+        """,
+        (session["user_id"],)
+    ).fetchall()
+
+    conn.close()
+
+    return render_template("history.html", sessions=sessions)
+
+@app.route("/history/<int:upload_id>")
+@login_required
+def view_history(upload_id):
+    conn = get_db_connection()
+
+    records = conn.execute(
+        """
+        SELECT student_no, student_name, present
+        FROM attendance_records
+        WHERE upload_file_id = ?
+        """,
+        (upload_id,)
+    ).fetchall()
+
+    conn.close()
+
+    if not records:
+        return "No attendance data found.", 404
+
+    present_students = [r for r in records if r["present"] == 1]
+    absent_students = [r for r in records if r["present"] == 0]
+
+    return render_template(
+        "history_detail.html",
+        present_students=present_students,
+        absent_students=absent_students,
+        total=len(records),
+        present_count=len(present_students)
+    )
 
 @app.route("/files/<file_type>/<path:filename>")
 def download_saved_file(file_type, filename):

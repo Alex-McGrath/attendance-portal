@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Session Attendance{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+
+  <h2 class="fw-bold text-primary mb-3">Session Breakdown</h2>
+
+  <p>
+    <strong>Total Students:</strong> {{ total }} <br>
+    <strong>Present:</strong> {{ present_count }} <br>
+    <strong>Absent:</strong> {{ total - present_count }}
+  </p>
+
+  <hr>
+
+  <div class="row">
+
+    <div class="col-md-6">
+      <h4 class="text-success">Present</h4>
+      <ul class="list-group">
+        {% for s in present_students %}
+          <li class="list-group-item">
+            {{ s["student_no"] }} — {{ s["student_name"] }}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="col-md-6">
+      <h4 class="text-danger">Absent</h4>
+      <ul class="list-group">
+        {% for s in absent_students %}
+          <li class="list-group-item">
+            {{ s["student_no"] }} — {{ s["student_name"] }}
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}

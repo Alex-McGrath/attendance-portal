@@ -41,9 +41,14 @@
     <div class="col-md-4 col-sm-6">
       <div class="card shadow-sm border-0 hover-card h-100">
         <div class="card-body">
-          <h5 class="card-title text-secondary">Analytics (Coming Soon)</h5>
-          <p class="card-text">View attendance summaries and statistics.</p>
+          <h5 class="card-title text-secondary">Attendance History</h5>
+          <p class="card-text">View past sessions and see who was present or absent.</p>
         </div>
+        {% if session.get('user_id') %}
+          <a href="/history" class="stretched-link"></a>
+        {% else %}
+          <a href="/login" class="stretched-link"></a>
+        {% endif %}
       </div>
     </div>
   </div>

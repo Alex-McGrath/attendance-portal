@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Attendance History{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+
+  <h2 class="fw-bold text-primary mb-4">Attendance History</h2>
+
+  {% if sessions and sessions|length > 0 %}
+    <div class="table-responsive">
+      <table class="table table-striped align-middle">
+        <thead class="table-dark">
+          <tr>
+            <th>Session</th>
+            <th>Date Uploaded</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sessions %}
+            <tr>
+              <td class="fw-semibold">{{ s["label"] }}</td>
+              <td class="text-muted">{{ s["created_at"] }}</td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-primary"
+                   href="/history/{{ s['id'] }}">
+                   View
+                </a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-muted">No attendance sessions uploaded yet.</p>
+  {% endif %}
+
+</div>
+{% endblock %}
