@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+app.db
+uploads/
+generated_templates/
+sig_uploads/
