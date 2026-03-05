@@ -12,6 +12,10 @@ import io
 import base64
 from io import TextIOWrapper
 
+#imports for signature matching
+import cv2
+import numpy as np
+
 # Database imports
 import sqlite3
 from functools import wraps
@@ -30,6 +34,13 @@ DB_PATH = "app.db"
 # Ensure folders exist
 os.makedirs("generated_templates", exist_ok=True)
 os.makedirs("uploads", exist_ok=True)
+
+# Ensure folders exist for signature database
+SIG_KNOWN_DIR = "known_sigs"
+SIG_UPLOAD_DIR = "sig_uploads"
+
+os.makedirs(SIG_KNOWN_DIR, exist_ok=True)
+os.makedirs(SIG_UPLOAD_DIR, exist_ok=True)
 
 
 # database helper functions - AI Assisted -
@@ -70,6 +81,18 @@ def init_db():
         FOREIGN KEY (upload_file_id) REFERENCES user_files(id)
     )
 """)
+    conn.execute("""
+    CREATE TABLE IF NOT EXISTS signatures (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        dhash_hex TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+)
+""")
 
     conn.commit()
     conn.close()
@@ -79,7 +102,6 @@ init_db()
 def crop_cell_to_data_uri(page, bbox, resolution=150, inset=2):
     x0, top, x1, bottom = bbox
 
-    # Inset slightly to avoid grid lines
     x0 += inset; top += inset; x1 -= inset; bottom -= inset
 
     cropped = page.crop((x0, top, x1, bottom))
@@ -87,11 +109,14 @@ def crop_cell_to_data_uri(page, bbox, resolution=150, inset=2):
 
     present = signature_present_from_pil(img)
 
+    #  compute hash for matching
+    sig_hash = dhash_from_pil(img)
+
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    return f"data:image/png;base64,{b64}", present
+    return f"data:image/png;base64,{b64}", present, sig_hash
 
 def login_required(view_func):
     @wraps(view_func)
@@ -157,14 +182,15 @@ def extract_rows_with_signature_images(pdf_path):
 
             has_student_data = bool(student_no or student_name)
 
-            sig_img, present_raw = crop_cell_to_data_uri(page, bbox)
+            sig_img, present_raw, sig_hash = crop_cell_to_data_uri(page, bbox)
 
             out_rows.append({
                 "student_no": student_no,
                 "student_name": student_name,
                 "sig_img": sig_img,
                 # Only show Yes/No if there is a student on that row
-                "present": present_raw if has_student_data else None
+                "present": present_raw if has_student_data else None,
+                "sig_hash": sig_hash if has_student_data else None,
             })
             
 
@@ -187,6 +213,152 @@ def signature_present_from_pil(img, dark_threshold=200, min_dark_ratio=0.01):
     ratio = dark / max(1, len(pixels))
 
     return ratio >= min_dark_ratio
+
+#Signature Matching functions:
+# ---------- HASHING (dHash) ----------
+def load_and_preprocess_image(file_path: str) -> np.ndarray:
+    """
+    Loads image with OpenCV, converts to grayscale, and binarizes to reduce background noise.
+    Returns a grayscale image array.
+    """
+    img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise ValueError("Could not read image. Ensure it's a valid PNG/JPG.")
+
+    # Light denoise helps with scanner noise / compression artifacts
+    img = cv2.GaussianBlur(img, (3, 3), 0)
+
+    # Adaptive threshold works well across different lighting/backgrounds
+    # We invert so ink becomes white on black (often helps stability)
+    th = cv2.adaptiveThreshold(
+        img, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31, 5
+    )
+    return th
+
+def dhash_from_gray(gray: np.ndarray, hash_size: int = 8) -> int:
+    """
+    dHash: resize to (hash_size+1, hash_size), compare adjacent pixels.
+    Produces hash_size*hash_size bits (default 64 bits).
+    """
+    resized = cv2.resize(gray, (hash_size + 1, hash_size), interpolation=cv2.INTER_AREA)
+    diff = resized[:, 1:] > resized[:, :-1]
+    # Convert boolean array to integer bits
+    bits = diff.flatten().astype(np.uint8)
+    h = 0
+    for b in bits:
+        h = (h << 1) | int(b)
+    return h
+
+def int_to_hex(h: int) -> str:
+    # 64-bit -> 16 hex chars (pad)
+    return f"{h:016x}"
+
+def hex_to_int(s: str) -> int:
+    return int(s, 16)
+
+def hamming_distance(a: int, b: int) -> int:
+    return (a ^ b).bit_count()
+
+def similarity_percent(dist: int, bits: int = 64) -> float:
+    """
+    Convert Hamming distance to a 'chance' percent.
+    This is a heuristic (not a true probability), but it's perfect for a prototype.
+    """
+    sim = 1.0 - (dist / bits)
+    sim = max(0.0, min(1.0, sim))
+    return round(sim * 100, 1)
+
+def dhash_from_pil(pil_img, hash_size: int = 8) -> int:
+
+    # Convert PIL -> grayscale numpy
+    gray = np.array(pil_img.convert("L"))
+
+    # Light blur + adaptive threshold (same spirit as enroll)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    th = cv2.adaptiveThreshold(
+        gray, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31, 5
+    )
+
+    # OPTIONAL but recommended: crop to ink (massive improvement)
+    ys, xs = np.where(th > 0)
+    if len(xs) > 0 and len(ys) > 0:
+        x0, x1 = xs.min(), xs.max()
+        y0, y1 = ys.min(), ys.max()
+        th = th[y0:y1+1, x0:x1+1]
+
+    # Pad so ink isn't touching edges
+    th = cv2.copyMakeBorder(th, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=0)
+
+    # Now compute dHash on the processed image
+    resized = cv2.resize(th, (hash_size + 1, hash_size), interpolation=cv2.INTER_AREA)
+    diff = resized[:, 1:] > resized[:, :-1]
+
+    bits = diff.flatten().astype(np.uint8)
+    h = 0
+    for b in bits:
+        h = (h << 1) | int(b)
+    return h
+
+def attach_reference_matches(rows):
+    if not session.get("user_id") or not rows:
+        return rows
+
+    conn = get_db_connection()
+    refs = conn.execute(
+        "SELECT first_name, last_name, dhash_hex FROM signatures WHERE user_id = ?",
+        (session["user_id"],)
+    ).fetchall()
+    conn.close()
+
+    ref_map = {}
+    for r in refs:
+        full = f"{r['first_name']} {r['last_name']}".strip().lower()
+        ref_map[full] = int(r["dhash_hex"], 16)
+
+    for row in rows:
+        # ALWAYS define both fields so the template never shows blanks
+        row["match_name"] = "-"
+        row["match_percent"] = None
+
+        # Skip blank/non-student rows
+        if row.get("present") is None or row.get("sig_hash") is None:
+            continue
+
+        # if absent, we do not attempt matching
+        if row.get("present") is False:
+            row["match_name"] = "No signature"
+            row["match_percent"] = None
+            continue
+
+        student_full = (row.get("student_name") or "").strip()
+        if not student_full:
+            row["match_name"] = "No name"
+            continue
+
+        key = student_full.lower()
+        ref_hash = ref_map.get(key)
+
+        if ref_hash is None:
+            row["match_name"] = "No reference enrolled"
+            continue
+
+        if row.get("present") is False:
+            row["match_name"] = "No signature"
+            row["match_percent"] = None
+            continue
+
+        row["match_name"] = student_full
+
+        dist = (row["sig_hash"] ^ ref_hash).bit_count()
+        row["match_percent"] = round(max(0.0, (1.0 - dist / 64) * 100), 1)
+
+    return rows
 
 # --- ROUTES ---
 
@@ -365,6 +537,12 @@ def upload_sheet():
 
         # Extract table + signature images
         rows = extract_rows_with_signature_images(save_path)
+        if rows is None:
+            return "No table detected in PDF", 400
+
+        attach_reference_matches(rows)
+
+
         # Save attendance records if logged in
         if session.get("user_id") and rows:
             conn = get_db_connection()
@@ -527,19 +705,19 @@ def profile():
         (session["user_id"],)
     ).fetchall()
 
-    templates = conn.execute(
+    signatures = conn.execute(
         """
-        SELECT id, label, filename, created_at
-        FROM user_files
-        WHERE user_id = ? AND type = 'template'
+        SELECT id, first_name, last_name, filename, created_at
+        FROM signatures
+        WHERE user_id = ?
         ORDER BY created_at DESC
         """,
         (session["user_id"],)
     ).fetchall()
-
+    
     conn.close()
 
-    return render_template("profile.html", uploads=uploads, templates=templates)
+    return render_template("profile.html", uploads=uploads, signatures=signatures)
 
 @app.route("/history")
 @login_required
@@ -621,6 +799,10 @@ def view_uploaded_file(filename):
     rows = extract_rows_with_signature_images(file_path)
     if rows is None:
         return "No table detected in PDF", 400
+    
+    attach_reference_matches(rows)
+
+    
 
     return render_template(
         "upload_results.html",
@@ -677,6 +859,145 @@ def delete_file(file_id):
     flash("File deleted.")
     return redirect(url_for("profile"))
 
+#Enroll Route (adding signatures to the database - per user )
+@app.route("/signatures/enroll", methods=["GET", "POST"])
+@login_required
+def enroll_signature():
+
+    if request.method == "POST":
+        first = request.form.get("first_name")
+        last = request.form.get("last_name")
+        file = request.files.get("file")
+
+        if not file:
+            flash("Please upload a signature image.")
+            return redirect(url_for("enroll_signature"))
+
+        filename = secure_filename(file.filename)
+        save_path = os.path.join(SIG_KNOWN_DIR, filename)
+        file.save(save_path)
+
+        gray = load_and_preprocess_image(save_path)
+        h = dhash_from_gray(gray)
+        h_hex = int_to_hex(h)
+
+        conn = get_db_connection()
+        conn.execute(
+            """
+            INSERT INTO signatures
+            (user_id, first_name, last_name, filename, dhash_hex, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session["user_id"],
+                first,
+                last,
+                filename,
+                h_hex,
+                datetime.now().isoformat()
+            )
+        )
+        conn.commit()
+        conn.close()
+
+        flash("Signature enrolled successfully.")
+        return redirect(url_for("enroll_signature"))
+
+    return render_template("sig_enroll.html")
+
+
+@app.route("/signatures/image/<path:filename>")
+@login_required
+def signature_image(filename):
+    conn = get_db_connection()
+    row = conn.execute(
+        "SELECT 1 FROM signatures WHERE user_id = ? AND filename = ?",
+        (session["user_id"], filename)
+    ).fetchone()
+    conn.close()
+
+    if row is None:
+        return "Unauthorized", 403
+
+    file_path = os.path.join("known_sigs", filename)
+    if not os.path.exists(file_path):
+        return "File not found", 404
+
+    return send_file(file_path)
+
+@app.route("/signatures/<int:sig_id>/edit", methods=["POST"])
+@login_required
+def edit_signature(sig_id):
+    first = (request.form.get("first_name") or "").strip()
+    last = (request.form.get("last_name") or "").strip()
+
+    if not first or not last:
+        flash("First and last name are required.")
+        return redirect(url_for("profile"))
+
+    conn = get_db_connection()
+    # ensure ownership
+    owned = conn.execute(
+        "SELECT 1 FROM signatures WHERE id = ? AND user_id = ?",
+        (sig_id, session["user_id"])
+    ).fetchone()
+
+    if owned is None:
+        conn.close()
+        return "Unauthorized", 403
+
+    conn.execute(
+        "UPDATE signatures SET first_name = ?, last_name = ? WHERE id = ?",
+        (first, last, sig_id)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Signature updated.")
+    return redirect(url_for("profile"))
+
+@app.route("/signatures/<int:sig_id>/delete", methods=["POST"])
+@login_required
+def delete_signature(sig_id):
+
+    conn = get_db_connection()
+
+    # Get the signature record
+    sig = conn.execute(
+        "SELECT id, user_id, filename FROM signatures WHERE id = ?",
+        (sig_id,)
+    ).fetchone()
+
+    if sig is None:
+        conn.close()
+        return "Signature not found", 404
+
+    # Ensure the logged-in user owns this signature
+    if sig["user_id"] != session["user_id"]:
+        conn.close()
+        return "Unauthorized", 403
+
+    file_path = os.path.join("known_sigs", sig["filename"])
+
+    # Delete DB row first
+    conn.execute(
+        "DELETE FROM signatures WHERE id = ?",
+        (sig_id,)
+    )
+    conn.commit()
+    conn.close()
+
+    # Delete the image file
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    except Exception as e:
+        print("Error deleting signature file:", e)
+
+    flash("Signature deleted.")
+    return redirect(url_for("profile"))
+
 # --- Run the Flask App ---
 if __name__ == '__main__':
     app.run(debug=True)
+

@@ -8,6 +8,7 @@
   </h2>
 
   <div class="row g-4">
+
     <!-- Uploads -->
     <div class="col-lg-6">
       <div class="card shadow-sm border-0">
@@ -29,33 +30,34 @@
                     <tr>
                       <td class="fw-semibold">{{ u["label"] }}</td>
                       <td class="text-muted">{{ u["created_at"] }}</td>
-                        <td class="text-end">
-                            <a class="btn btn-sm btn-outline-secondary me-2"
-                                href="/view/upload/{{ u['filename'] }}">
-                                View
-                            </a>
 
-                            <a class="btn btn-sm btn-outline-primary me-2"
-                                href="/files/upload/{{ u['filename'] }}">
-                                Download
-                            </a>
+                      <td class="text-end">
+                        <a class="btn btn-sm btn-outline-secondary me-2"
+                           href="/view/upload/{{ u['filename'] }}">
+                          View
+                        </a>
 
-                            <form action="{{ url_for('delete_file', file_id=u['id']) }}"
-                                method="POST"
-                                style="display:inline;">
-                                <button type="submit"
-                                        class="btn btn-sm btn-outline-danger"
-                                        onclick="return confirm('Delete this upload?');">
-                                    🗑
-                                </button>
-                            </form>
-                        </td>
+                        <a class="btn btn-sm btn-outline-primary me-2"
+                           href="/files/upload/{{ u['filename'] }}">
+                          Download
+                        </a>
 
+                        <form action="{{ url_for('delete_file', file_id=u['id']) }}"
+                              method="POST"
+                              style="display:inline;">
+                          <button type="submit"
+                                  class="btn btn-sm btn-outline-danger"
+                                  onclick="return confirm('Delete this upload?');">
+                            🗑
+                          </button>
+                        </form>
+                      </td>
                     </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
+
           {% else %}
             <p class="text-muted mb-0">No uploads yet.</p>
           {% endif %}
@@ -63,44 +65,116 @@
       </div>
     </div>
 
-    <!-- Templates -->
+
+    <!-- Signatures -->
     <div class="col-lg-6">
       <div class="card shadow-sm border-0">
         <div class="card-body">
-          <h5 class="fw-bold mb-3">Generated Templates</h5>
 
-          {% if templates and templates|length > 0 %}
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <h5 class="fw-bold mb-0">Enrolled Signatures</h5>
+
+            {% if signatures is defined %}
+              <span class="badge text-bg-light border">
+                {{ signatures|length }}
+              </span>
+            {% endif %}
+          </div>
+
+          <a href="/signatures/enroll" class="btn btn-sm btn-outline-primary">
+            Enroll
+          </a>
+        </div>
+
+          {% if signatures is defined and signatures|length > 0 %}
+
             <div class="table-responsive">
               <table class="table table-sm align-middle">
                 <thead>
                   <tr>
-                    <th>Label</th>
-                    <th>Created</th>
+                    <th style="width:160px;">Signature</th>
+                    <th>Name</th>
+                    <th>Enrolled</th>
                     <th></th>
                   </tr>
                 </thead>
+
                 <tbody>
-                  {% for t in templates %}
+                  {% for s in signatures %}
                     <tr>
-                      <td class="fw-semibold">{{ t["label"] }}</td>
-                      <td class="text-muted">{{ t["created_at"] }}</td>
-                      <td class="text-end">
-                        <a class="btn btn-sm btn-outline-success"
-                           href="/files/template/{{ t['filename'] }}">
-                          Download
-                        </a>
+
+                      <td>
+                        <img src="/signatures/image/{{ s['filename'] }}"
+                             style="max-height:45px;"
+                             class="border rounded px-2 py-1 bg-white">
                       </td>
+
+                      <td class="fw-semibold">
+                        {{ s["first_name"] }} {{ s["last_name"] }}
+                      </td>
+
+                      <td class="text-muted">
+                        {{ s["created_at"] }}
+                      </td>
+
+                      <td class="text-end">
+
+                        <!-- Edit name -->
+                        <form method="POST"
+                              action="/signatures/{{ s['id'] }}/edit"
+                              class="d-inline-flex gap-2 me-2">
+
+                          <input name="first_name"
+                                class="form-control form-control-sm"
+                                style="width:100px;"
+                                value="{{ s['first_name'] }}">
+
+                          <input name="last_name"
+                                class="form-control form-control-sm"
+                                style="width:100px;"
+                                value="{{ s['last_name'] }}">
+
+                          <button type="submit"
+                                  class="btn btn-sm btn-outline-secondary">
+                            Save
+                          </button>
+
+                        </form>
+
+                        <!-- Delete signature -->
+                        <form method="POST"
+                              action="/signatures/{{ s['id'] }}/delete"
+                              style="display:inline;">
+
+                          <button type="submit"
+                                  class="btn btn-sm btn-outline-danger"
+                                  onclick="return confirm('Delete this signature?');">
+                            Delete
+                          </button>
+
+                        </form>
+
+                      </td>
+
                     </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
+
           {% else %}
-            <p class="text-muted mb-0">No templates yet.</p>
+
+            <p class="text-muted mb-0">
+              No signatures enrolled yet.
+            </p>
+
           {% endif %}
+
         </div>
       </div>
     </div>
+
   </div>
 </div>
 {% endblock %}

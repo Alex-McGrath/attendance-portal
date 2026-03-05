@@ -19,6 +19,8 @@
         <th>Student Name (Block Caps)</th>
         <th>Signature</th>
         <th>In attendance?</th>
+        <th>Best match</th>
+        <th>Similarity</th>
       </tr>
     </thead>
     <tbody>
@@ -40,6 +42,16 @@
               Yes
             {% else %}
               No
+            {% endif %}
+          </td>
+          <td>
+            {{ row.match_name if row.match_name is defined else "-" }}
+          </td>
+          <td class="fw-semibold">
+            {% if row.match_percent is none %}
+              -
+            {% else %}
+              {{ row.match_percent }}%
             {% endif %}
           </td>
         </tr>

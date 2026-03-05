@@ -18,7 +18,7 @@ python -m venv venv
 .
 env\Scripts\Activate.ps1
 
-# On Command Prompt
+# On Command Prompt (important!!!!!!)
 py -m venv venv
 venv\Scripts\activate
 
