@@ -2,7 +2,7 @@
 
 A Flask-based attendance processing platform that combines traditional handwritten attendance sheets with automated digital verification and storage.
 
-The system allows educators to generate structured attendance templates, collect handwritten signatures in the classroom, and then upload the completed sheet for automated extraction and verification. Signature similarity techniques are used to compare uploaded signatures with stored reference signatures, enabling automated attendance validation.
+The system allows educators to make structured attendance templates, collect handwritten signatures in class, and then upload the completed sheet for automated extraction and verification. Signature similarity techniques are used to compare uploaded signatures with stored reference signatures, enabling automated attendance validation.
 
 This project demonstrates how manual attendance workflows can be enhanced through structured document processing, computer vision techniques, and database-backed digital record keeping.
 
@@ -38,6 +38,8 @@ This project demonstrates how manual attendance workflows can be enhanced throug
 ---
 
 ## Setup Instructions
+
+### 0. Recommended to use python 3.12 as thats what was used while creating
 
 ### 1. Clone the Repository
 
