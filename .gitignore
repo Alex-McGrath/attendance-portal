@@ -5,3 +5,4 @@ app.db
 uploads/
 generated_templates/
 sig_uploads/
+known_sigs/

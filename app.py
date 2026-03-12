@@ -1,3 +1,4 @@
+#app/py is the main file for all functions
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, flash
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
@@ -43,7 +44,7 @@ os.makedirs(SIG_KNOWN_DIR, exist_ok=True)
 os.makedirs(SIG_UPLOAD_DIR, exist_ok=True)
 
 
-# database helper functions - AI Assisted -
+# database helper functions -
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -99,6 +100,10 @@ def init_db():
 
 init_db()
 
+# this crops the signature column cell from the detected table row.
+# cropped image is converted to base64 so it can be displayed
+# directly in the results page. also run signature detection
+# and generate the hash used for matching.
 def crop_cell_to_data_uri(page, bbox, resolution=150, inset=2):
     x0, top, x1, bottom = bbox
 
@@ -127,6 +132,11 @@ def login_required(view_func):
         return view_func(*args, **kwargs)
     return wrapped
 
+
+# reads the uploaded attendance sheet and extracts each table row.
+# ror every row the student number, student name,
+# and crop the signature cell are collected so it can be analysed and shown
+# in the results page.
 def extract_rows_with_signature_images(pdf_path):
     def get_bbox(cell):
         # Case 1: object with .bbox
@@ -156,7 +166,7 @@ def extract_rows_with_signature_images(pdf_path):
             return None
 
         t = tables[0]
-        text_rows = t.extract()   # list of text rows
+        text_rows = t.extract()   # list of ttext rows
         row_objs = t.rows         # geometry rows
 
         out_rows = []
@@ -173,10 +183,9 @@ def extract_rows_with_signature_images(pdf_path):
             bbox = get_bbox(sig_cell)
 
             if bbox is None:
-                # If this happens, we can print/debug what type it is
                 return "Could not read signature cell bbox", 500
 
-            # Some PDFs may return None for empty cells, so guard with "or ''"
+            # Some PDFs may return None for the empty cells, so guards it with "or ''"
             student_no = (row_text[0] or "").strip()
             student_name = (row_text[1] or "").strip()
 
@@ -188,7 +197,7 @@ def extract_rows_with_signature_images(pdf_path):
                 "student_no": student_no,
                 "student_name": student_name,
                 "sig_img": sig_img,
-                # Only show Yes/No if there is a student on that row
+                # only show yes or no if there is a student on that row
                 "present": present_raw if has_student_data else None,
                 "sig_hash": sig_hash if has_student_data else None,
             })
@@ -198,14 +207,14 @@ def extract_rows_with_signature_images(pdf_path):
 
 def signature_present_from_pil(img, dark_threshold=200, min_dark_ratio=0.01):
     """
-    Returns True if the image likely contains ink (signature), else False.
+    this returns True if the image maybe contains ink (signature), else False.
     dark_threshold: pixel values below this are considered 'ink' (0=black, 255=white)
     min_dark_ratio: fraction of dark pixels needed to count as present
     """
-    # Convert to grayscale for a stable threshold test
+    # Convert to greyscale
     g = img.convert("L")
 
-    # Optional: speed + smoothing (helps with noise)
+    # speed + smoothing (helps with noise)
     g = g.resize((max(1, g.width // 2), max(1, g.height // 2)))
 
     pixels = list(g.getdata())
@@ -215,21 +224,20 @@ def signature_present_from_pil(img, dark_threshold=200, min_dark_ratio=0.01):
     return ratio >= min_dark_ratio
 
 #Signature Matching functions:
-# ---------- HASHING (dHash) ----------
+# ---------- HASHING (dHash) --------
 def load_and_preprocess_image(file_path: str) -> np.ndarray:
     """
-    Loads image with OpenCV, converts to grayscale, and binarizes to reduce background noise.
-    Returns a grayscale image array.
+    Loads image with OpenCV, converts to greyscale, and binarises to reduce background noise.
+    Returns a greyscale image array.
     """
     img = cv2.imread(file_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError("Could not read image. Ensure it's a valid PNG/JPG.")
 
-    # Light denoise helps with scanner noise / compression artifacts
+    # Light denoise counters the scanner noise
     img = cv2.GaussianBlur(img, (3, 3), 0)
 
-    # Adaptive threshold works well across different lighting/backgrounds
-    # We invert so ink becomes white on black (often helps stability)
+    # We invert so ink becomes white on black which helps other pen colours still get registered
     th = cv2.adaptiveThreshold(
         img, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -245,7 +253,7 @@ def dhash_from_gray(gray: np.ndarray, hash_size: int = 8) -> int:
     """
     resized = cv2.resize(gray, (hash_size + 1, hash_size), interpolation=cv2.INTER_AREA)
     diff = resized[:, 1:] > resized[:, :-1]
-    # Convert boolean array to integer bits
+    # Convert the boolean array to integer bits
     bits = diff.flatten().astype(np.uint8)
     h = 0
     for b in bits:
@@ -264,8 +272,8 @@ def hamming_distance(a: int, b: int) -> int:
 
 def similarity_percent(dist: int, bits: int = 64) -> float:
     """
-    Convert Hamming distance to a 'chance' percent.
-    This is a heuristic (not a true probability), but it's perfect for a prototype.
+    Convert Hamming distance to a chance percent.
+    This is a heuristic (not a true probability)
     """
     sim = 1.0 - (dist / bits)
     sim = max(0.0, min(1.0, sim))
@@ -273,10 +281,10 @@ def similarity_percent(dist: int, bits: int = 64) -> float:
 
 def dhash_from_pil(pil_img, hash_size: int = 8) -> int:
 
-    # Convert PIL -> grayscale numpy
+    # Convert PIL -> greyscale numpy
     gray = np.array(pil_img.convert("L"))
 
-    # Light blur + adaptive threshold (same spirit as enroll)
+    # Light blur + adaptive threshold (same ide as enroll)
     gray = cv2.GaussianBlur(gray, (3, 3), 0)
     th = cv2.adaptiveThreshold(
         gray, 255,
@@ -285,17 +293,16 @@ def dhash_from_pil(pil_img, hash_size: int = 8) -> int:
         31, 5
     )
 
-    # OPTIONAL but recommended: crop to ink (massive improvement)
     ys, xs = np.where(th > 0)
     if len(xs) > 0 and len(ys) > 0:
         x0, x1 = xs.min(), xs.max()
         y0, y1 = ys.min(), ys.max()
         th = th[y0:y1+1, x0:x1+1]
 
-    # Pad so ink isn't touching edges
+    # Padding so ink isnt touching edges
     th = cv2.copyMakeBorder(th, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=0)
 
-    # Now compute dHash on the processed image
+    # computes dHash on the processed image
     resized = cv2.resize(th, (hash_size + 1, hash_size), interpolation=cv2.INTER_AREA)
     diff = resized[:, 1:] > resized[:, :-1]
 
@@ -305,6 +312,11 @@ def dhash_from_pil(pil_img, hash_size: int = 8) -> int:
         h = (h << 1) | int(b)
     return h
 
+
+# this matches extracted signatures from the uploaded sheet against
+# reference signatures stored for the logged user.
+# The comparison is done using hash distance and converted
+# into a similarity percentage.
 def attach_reference_matches(rows):
     if not session.get("user_id") or not rows:
         return rows
@@ -322,15 +334,15 @@ def attach_reference_matches(rows):
         ref_map[full] = int(r["dhash_hex"], 16)
 
     for row in rows:
-        # ALWAYS define both fields so the template never shows blanks
+        # defines both fields so template isnt left blank
         row["match_name"] = "-"
         row["match_percent"] = None
 
-        # Skip blank/non-student rows
+        # skips blank or non-student rows
         if row.get("present") is None or row.get("sig_hash") is None:
             continue
 
-        # if absent, we do not attempt matching
+        # if absent, dont match
         if row.get("present") is False:
             row["match_name"] = "No signature"
             row["match_percent"] = None
@@ -398,7 +410,7 @@ def register():
             user_id = cur.lastrowid
             conn.close()
 
-            # Auto log-in after register
+            # Automatically logs in after registering
             session["user_id"] = user_id
             session["username"] = username
 
@@ -479,7 +491,7 @@ def download_template():
     headers = ["Student Number", "Student Name (Block Caps)", "Signature"]
     data = [headers]
 
-    # Add 30empty rows
+    # Add 30empty rows as standard
     for _ in range(30):
         data.append(["", "", ""])
 
@@ -499,7 +511,7 @@ def download_template():
 
     elements.append(table)
 
-    # Build PDF
+    # Build thePDF
     pdf.build(elements)
 
     return send_file(file_path, as_attachment=True)
@@ -525,7 +537,7 @@ def upload_sheet():
 
         file.save(save_path)
 
-        # Save metadata if logged in
+        # Save metadata if user logs in
         if session.get("user_id"):
             conn = get_db_connection()
             conn.execute(
@@ -535,7 +547,7 @@ def upload_sheet():
             conn.commit()
             conn.close()
 
-        # Extract table + signature images
+        # Extract table + the sig images
         rows = extract_rows_with_signature_images(save_path)
         if rows is None:
             return "No table detected in PDF", 400
@@ -543,7 +555,7 @@ def upload_sheet():
         attach_reference_matches(rows)
 
 
-        # Save attendance records if logged in
+        # Save attendance records to account if logged in
         if session.get("user_id") and rows:
             conn = get_db_connection()
 
@@ -561,7 +573,7 @@ def upload_sheet():
                     if not r["student_no"] and not r["student_name"]:
                         continue
 
-                    # present might be None for blank rows, so force 0/1 for real students
+                    # present might be None for blank rows, so force 0/1 for actual students
                     present_val = 1 if r["present"] else 0
 
                     conn.execute("""
@@ -613,7 +625,7 @@ def create_template():
         except (TypeError, ValueError):
             row_number = 30  # Default
 
-        # --- NEW: CSV Upload Handling ---
+        # --- CSV Upload Handling ---
         csv_file = request.files.get('csv_file')
         csv_rows = []
 
@@ -655,7 +667,7 @@ def create_template():
         for _ in range(max(0, remaining)):
             data.append(["" for _ in headings])
 
-        # PDF Output Path
+        # PDF Output Path + initialises runtime folder
         file_path = f"generated_templates/{class_name}_attendance_custom.pdf"
 
         # Create PDF
@@ -818,7 +830,7 @@ def delete_file(file_id):
 
     conn = get_db_connection()
 
-    # Only allow deleting files that belong to the logged-in user
+    # Only allow deleting files that belong to the logged-in user for data protection
     file_row = conn.execute(
         "SELECT id, user_id, type, filename FROM user_files WHERE id = ?",
         (file_id,)
@@ -830,7 +842,7 @@ def delete_file(file_id):
 
     if file_row["user_id"] != session["user_id"]:
         conn.close()
-        return "Unauthorized", 403
+        return "Unauthorised", 403
 
     # Work out folder based on type
     if file_row["type"] == "upload":
@@ -848,7 +860,7 @@ def delete_file(file_id):
     conn.commit()
     conn.close()
 
-    # Then try delete the file from disk (ignore if already gone)
+    # Then delete the file from disk it ignores if file gone already
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -917,7 +929,7 @@ def signature_image(filename):
     conn.close()
 
     if row is None:
-        return "Unauthorized", 403
+        return "Unauthorised", 403
 
     file_path = os.path.join("known_sigs", filename)
     if not os.path.exists(file_path):
@@ -936,7 +948,7 @@ def edit_signature(sig_id):
         return redirect(url_for("profile"))
 
     conn = get_db_connection()
-    # ensure ownership
+    # issue ownership
     owned = conn.execute(
         "SELECT 1 FROM signatures WHERE id = ? AND user_id = ?",
         (sig_id, session["user_id"])
@@ -944,7 +956,7 @@ def edit_signature(sig_id):
 
     if owned is None:
         conn.close()
-        return "Unauthorized", 403
+        return "Unauthorised", 403
 
     conn.execute(
         "UPDATE signatures SET first_name = ?, last_name = ? WHERE id = ?",
@@ -975,11 +987,11 @@ def delete_signature(sig_id):
     # Ensure the logged-in user owns this signature
     if sig["user_id"] != session["user_id"]:
         conn.close()
-        return "Unauthorized", 403
+        return "Unauthorised", 403
 
     file_path = os.path.join("known_sigs", sig["filename"])
 
-    # Delete DB row first
+    # Delete DB row first for same reason
     conn.execute(
         "DELETE FROM signatures WHERE id = ?",
         (sig_id,)
